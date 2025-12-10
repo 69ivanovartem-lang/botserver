@@ -193,11 +193,7 @@ class Database:
 
 # Инициализация базы данных
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///zettelkasten.db")
-if DATABASE_URL.startswith("sqlite:///"):
-    db_path = DATABASE_URL.replace("sqlite:///", "")
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-else:
-    db_path = "zettelkasten.db"
+db_path = "zettelkasten.db"
 
 db = Database(db_path)
 
