@@ -20,7 +20,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite:///data/zettelkasten.db
+      - DATABASE_URL=sqlite:///zettelkasten.db
     restart: unless-stopped
     volumes:
       - ./data:/app/data
