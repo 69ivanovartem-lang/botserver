@@ -1,0 +1,35 @@
+services:
+  bot:
+    build: ./bot
+    container_name: zettelkasten_bot
+    depends_on:
+      - server
+    environment:
+      - API_URL=http://server:8000
+      - BOT_TOKEN=8250247525:AAFIixru3WzZGxdPoQ-e35PvegpPSGzzn7s
+      - DATABASE_URL=sqlite:///zettelkasten.db
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    networks:
+      - zettelkasten_net
+
+  server:
+    build: ./server
+    container_name: zettelkasten_server
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///data/zettelkasten.db
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    networks:
+      - zettelkasten_net
+
+networks:
+  zettelkasten_net:
+    driver: bridge
+
+volumes:
+  data:
