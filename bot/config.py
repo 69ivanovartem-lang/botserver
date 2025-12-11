@@ -56,6 +56,6 @@ logger = setup_logging()
 def get_log_level():
     """Безопасное получение уровня логирования"""
     try:
-        return logging.getLevelName(logger._logger.level)
-    except AttributeError:
         return LOG_LEVEL
+    except:
+        return "INFO"

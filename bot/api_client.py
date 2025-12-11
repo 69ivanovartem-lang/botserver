@@ -1,5 +1,8 @@
 # api_client.py
 import requests
+import time
+import json
+import os
 from typing import Optional, List, Dict, Any
 from config import logger, API_URL
 
@@ -64,6 +67,40 @@ class APIClient:
                         exc_info=True)
         
         return None
+    
+    def health_check(self) -> bool:
+        """Проверка доступности API"""
+        try:
+            # Пробуем несколько эндпоинтов
+            endpoints_to_check = [
+                "/health",
+                "/api/health",
+                "/api/docs",
+                "/",
+            ]
+            
+            for endpoint in endpoints_to_check:
+                try:
+                    response = self.session.get(
+                        f"{self.base_url}{endpoint}", 
+                        timeout=3
+                    )
+                    if response.status_code < 500:
+                        logger.debug("api_health_check_success", 
+                                    endpoint=endpoint,
+                                    status_code=response.status_code)
+                        return True
+                except:
+                    continue
+            
+            logger.warning("api_health_check_failed", api_url=self.base_url)
+            return False
+            
+        except Exception as e:
+            logger.warning("api_health_check_exception", 
+                         error=str(e),
+                         api_url=self.base_url)
+            return False
     
     def add_note(self, user_id: int, title: str, content: str, tags: Optional[str] = None) -> Optional[Dict]:
         """Создать новую заметку"""
@@ -186,40 +223,6 @@ class APIClient:
                          note_id=note_id)
         
         return success
-    
-    def health_check(self) -> bool:
-        """Проверка доступности API"""
-        try:
-            # Пробуем несколько эндпоинтов
-            endpoints_to_check = [
-                "/health",
-                "/api/health",
-                "/api/docs",  # если используется FastAPI
-                "/",  # корневой эндпоинт
-            ]
-            
-            for endpoint in endpoints_to_check:
-                try:
-                    response = self.session.get(
-                        f"{self.base_url}{endpoint}", 
-                        timeout=3
-                    )
-                    if response.status_code < 500:
-                        logger.debug("api_health_check_success", 
-                                    endpoint=endpoint,
-                                    status_code=response.status_code)
-                        return True
-                except:
-                    continue
-            
-            logger.warning("api_health_check_failed", api_url=self.base_url)
-            return False
-            
-        except Exception as e:
-            logger.warning("api_health_check_exception", 
-                         error=str(e),
-                         api_url=self.base_url)
-            return False
     
     def get_note_by_id(self, note_id: int, user_id: int) -> Optional[Dict]:
         """Получить заметку по ID"""
