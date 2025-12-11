@@ -5,13 +5,8 @@ from api_client import APIClient
 from handlers import MessageHandlers
 from keyboards import create_main_keyboard, create_note_actions_keyboard
 
-# Глобальная переменная для API клиента
-api = None
-
 def setup_bot() -> telebot.TeleBot:
     """Настройка и запуск бота"""
-    global api
-    
     logger.info("bot_setup_started")
     
     # Инициализация бота
@@ -48,7 +43,7 @@ def setup_bot() -> telebot.TeleBot:
     
     @bot.message_handler(commands=['graph'])
     def graph_wrapper(message):
-        handlers.graph_command(message)
+        send_visualization_options(bot, message.chat.id, message.from_user.id)
     
     @bot.message_handler(commands=['search'])
     def search_wrapper(message):
@@ -75,30 +70,30 @@ def setup_bot() -> telebot.TeleBot:
         
         if call.data == "text_tree":
             bot.answer_callback_query(call.id, "Текстовое дерево")
-            send_text_tree(bot, chat_id, user_id)
+            send_text_tree(bot, chat_id, user_id, api)
             
         elif call.data == "image_graph":
             bot.answer_callback_query(call.id, "Граф в виде изображения")
-            send_image_graph(bot, chat_id, user_id)
+            send_image_graph(bot, chat_id, user_id, api)
             
         elif call.data.startswith("view_note_"):
             note_id = int(call.data.replace("view_note_", ""))
             bot.answer_callback_query(call.id, f"Просмотр заметки {note_id}")
-            show_note_details(bot, chat_id, user_id, note_id, detailed=False)
+            show_note_details(bot, chat_id, user_id, note_id, api, detailed=False)
             
         elif call.data.startswith("detail_note_"):
             note_id = int(call.data.replace("detail_note_", ""))
             bot.answer_callback_query(call.id, f"Подробности заметки {note_id}")
-            show_note_details(bot, chat_id, user_id, note_id, detailed=True)
+            show_note_details(bot, chat_id, user_id, note_id, api, detailed=True)
             
         elif call.data.startswith("delete_note_"):
             note_id = int(call.data.replace("delete_note_", ""))
             bot.answer_callback_query(call.id, f"Удаление заметки {note_id}")
-            delete_note_confirmation(bot, call, note_id, user_id)
+            delete_note_confirmation(bot, call, note_id, user_id, api)
             
         elif call.data.startswith("confirm_delete_"):
             note_id = int(call.data.replace("confirm_delete_", ""))
-            confirm_delete_handler(bot, call, note_id, user_id)
+            confirm_delete_handler(bot, call, note_id, user_id, api)
             
         elif call.data.startswith("cancel_delete_"):
             cancel_delete_handler(bot, call)
@@ -106,34 +101,76 @@ def setup_bot() -> telebot.TeleBot:
         elif call.data.startswith("page_"):
             page = int(call.data.replace("page_", ""))
             bot.answer_callback_query(call.id, f"Страница {page + 1}")
-            show_notes_page(bot, call, user_id, page)
+            show_notes_page(bot, call, user_id, page, api)
     
     logger.info("bot_setup_completed")
     return bot
 
-def send_text_tree(bot, chat_id, user_id):
+def send_visualization_options(bot, chat_id, user_id):
+    """Отправить варианты визуализации"""
+    from keyboards import create_visualization_keyboard
+    
+    bot.send_message(
+        chat_id,
+        "🎨 Выберите тип визуализации:",
+        reply_markup=create_visualization_keyboard()
+    )
+
+def send_text_tree(bot, chat_id, user_id, api):
     """Отправить текстовое дерево заметок"""
     try:
         data = api.get_note_graph(user_id)
         
-        if not data.get('notes'):
+        # Проверяем формат данных
+        notes = data.get('notes', {})
+        if not notes:
             bot.send_message(chat_id, "📭 У вас пока нет заметок для построения дерева.")
             return
         
         tree_text = "🌳 Дерево заметок:\n\n"
         
-        for note_id, note_info in data['notes'].items():
-            tree_text += f"📄 {note_info.get('title', 'Без названия')} (ID: {note_id})\n"
+        # Проверяем тип notes - может быть dict или list
+        if isinstance(notes, dict):
+            items = notes.items()
+        elif isinstance(notes, list):
+            items = [(str(note.get('id', '')), note) for note in notes]
+        else:
+            bot.send_message(chat_id, "❌ Неверный формат данных заметок.")
+            return
+        
+        for note_id_str, note_info in items:
+            if isinstance(note_info, dict):
+                title = note_info.get('title', 'Без названия')
+                note_id = note_info.get('id', note_id_str)
+            else:
+                title = str(note_info)
+                note_id = note_id_str
+            
+            tree_text += f"📄 {title} (ID: {note_id})\n"
             
             # Показываем связи
-            links = note_info.get('links', [])
+            links = []
+            if isinstance(note_info, dict):
+                links = note_info.get('links', [])
+            
             if links:
                 tree_text += "  └── Связано с: "
                 linked_titles = []
                 for link in links:
-                    target_note = data['notes'].get(str(link))
+                    target_note = None
+                    if isinstance(notes, dict):
+                        target_note = notes.get(str(link))
+                    elif isinstance(notes, list):
+                        for n in notes:
+                            if isinstance(n, dict) and n.get('id') == link:
+                                target_note = n
+                                break
+                    
                     if target_note:
-                        linked_titles.append(target_note.get('title', 'Без названия')[:20])
+                        if isinstance(target_note, dict):
+                            linked_titles.append(target_note.get('title', 'Без названия')[:20])
+                        else:
+                            linked_titles.append(str(target_note)[:20])
                 
                 if linked_titles:
                     tree_text += ", ".join(linked_titles) + "\n"
@@ -148,54 +185,91 @@ def send_text_tree(bot, chat_id, user_id):
         logger.error("send_text_tree_failed", error=str(e))
         bot.send_message(chat_id, "❌ Ошибка при построении дерева заметок.")
 
-def send_image_graph(bot, chat_id, user_id):
-    """Отправить граф в виде текстового представления (временно вместо изображения)"""
+def send_image_graph(bot, chat_id, user_id, api):
+    """Отправить граф в виде текстового представления"""
     try:
         data = api.get_note_graph(user_id)
         
-        if not data.get('notes'):
+        # Проверяем формат данных
+        notes = data.get('notes', {})
+        if not notes:
             bot.send_message(chat_id, "📭 У вас пока нет заметок для построения графа.")
             return
         
-        # Создаем простое текстовое представление графа
-        notes_count = len(data['notes'])
+        # Определяем количество заметок
+        if isinstance(notes, dict):
+            notes_count = len(notes)
+            notes_list = list(notes.values())
+        elif isinstance(notes, list):
+            notes_count = len(notes)
+            notes_list = notes
+        else:
+            notes_count = 0
+            notes_list = []
+        
         graph_text = f"🖼️ Граф заметок ({notes_count} заметок):\n\n"
         
-        # Список всех заметок
-        for i, (note_id, note_info) in enumerate(data['notes'].items(), 1):
-            title = note_info.get('title', 'Без названия')
-            links = note_info.get('links', [])
+        # Простое текстовое представление
+        for i, note_info in enumerate(notes_list, 1):
+            if isinstance(note_info, dict):
+                title = note_info.get('title', 'Без названия')
+                note_id = note_info.get('id', i)
+            else:
+                title = str(note_info)
+                note_id = i
             
             graph_text += f"{i}. 📄 {title}\n"
-            if links:
-                graph_text += f"   └── Связи: {len(links)}\n"
         
-        graph_text += "\n📊 Матрица связей:\n"
-        graph_text += "   (1 - есть связь, 0 - нет связи)\n\n"
+        graph_text += "\n📊 Связи между заметками:\n"
         
-        # Создаем простую матрицу
-        note_ids = list(data['notes'].keys())
-        for i, from_id in enumerate(note_ids, 1):
+        # Простая матрица связей
+        matrix_size = min(notes_count, 10)  # Ограничиваем размер для читаемости
+        
+        for i in range(matrix_size):
             row = []
-            for j, to_id in enumerate(note_ids, 1):
-                from_info = data['notes'][from_id]
-                if str(to_id) in [str(link) for link in from_info.get('links', [])]:
-                    row.append("1")
+            for j in range(matrix_size):
+                if i == j:
+                    row.append("•")
                 else:
-                    row.append("0")
+                    # Простая логика: связь есть, если заметки имеют общие слова в названии
+                    note1 = notes_list[i] if i < len(notes_list) else {}
+                    note2 = notes_list[j] if j < len(notes_list) else {}
+                    
+                    title1 = str(note1.get('title', '')).lower() if isinstance(note1, dict) else ''
+                    title2 = str(note2.get('title', '')).lower() if isinstance(note2, dict) else ''
+                    
+                    # Проверяем, есть ли общие слова (простая логика)
+                    words1 = set(title1.split())
+                    words2 = set(title2.split())
+                    
+                    if words1.intersection(words2):
+                        row.append("1")
+                    else:
+                        row.append("0")
             
-            graph_text += f"{i}: {' '.join(row)}\n"
+            graph_text += f"{i+1}: {' '.join(row)}\n"
+        
+        if notes_count > 10:
+            graph_text += f"\n... и еще {notes_count - 10} заметок"
         
         bot.send_message(chat_id, graph_text)
         
     except Exception as e:
         logger.error("send_image_graph_failed", error=str(e))
-        bot.send_message(chat_id, "❌ Ошибка при построении графа. Используйте текстовое дерево.")
+        bot.send_message(chat_id, "❌ Ошибка при построении графа заметок.")
 
-def show_note_details(bot, chat_id, user_id, note_id, detailed=False):
+def show_note_details(bot, chat_id, user_id, note_id, api, detailed=False):
     """Показать детали заметки"""
     try:
         note = api.get_note_by_id(note_id, user_id)
+        
+        if not note:
+            # Пробуем найти заметку в списке
+            notes = api.get_user_notes(user_id)
+            for n in notes:
+                if isinstance(n, dict) and n.get('id') == note_id:
+                    note = n
+                    break
         
         if not note:
             bot.send_message(chat_id, f"❌ Заметка с ID {note_id} не найдена.")
@@ -203,9 +277,9 @@ def show_note_details(bot, chat_id, user_id, note_id, detailed=False):
         
         if detailed:
             message_text = f"📋 Подробности заметки:\n\n"
-            message_text += f"🆔 ID: {note.get('id')}\n"
-            message_text += f"📝 Заголовок: {note.get('title')}\n\n"
-            message_text += f"📄 Содержание:\n{note.get('content')}\n\n"
+            message_text += f"🆔 ID: {note.get('id', 'N/A')}\n"
+            message_text += f"📝 Заголовок: {note.get('title', 'Без названия')}\n\n"
+            message_text += f"📄 Содержание:\n{note.get('content', 'Нет содержания')}\n\n"
             
             tags = note.get('tags')
             if tags:
@@ -234,7 +308,7 @@ def show_note_details(bot, chat_id, user_id, note_id, detailed=False):
         logger.error("show_note_details_failed", error=str(e))
         bot.send_message(chat_id, "❌ Ошибка при получении информации о заметке.")
 
-def delete_note_confirmation(bot, call, note_id, user_id):
+def delete_note_confirmation(bot, call, note_id, user_id, api):
     """Запрос подтверждения удаления заметки"""
     try:
         note = api.get_note_by_id(note_id, user_id)
@@ -263,7 +337,7 @@ def delete_note_confirmation(bot, call, note_id, user_id):
         logger.error("delete_note_confirmation_failed", error=str(e))
         bot.answer_callback_query(call.id, "Ошибка при подтверждении удаления", show_alert=True)
 
-def confirm_delete_handler(bot, call, note_id, user_id):
+def confirm_delete_handler(bot, call, note_id, user_id, api):
     """Обработчик подтверждения удаления"""
     try:
         success = api.delete_note(note_id, user_id)
@@ -289,11 +363,10 @@ def cancel_delete_handler(bot, call):
         call.message.message_id
     )
 
-def show_notes_page(bot, call, user_id, page):
+def show_notes_page(bot, call, user_id, page, api):
     """Показать страницу со списком заметок"""
     try:
-        from handlers import MessageHandlers
-        from telebot import TeleBot
+        from keyboards import create_notes_list_keyboard
         
         # Получаем заметки
         notes = api.get_user_notes(user_id)
@@ -301,12 +374,7 @@ def show_notes_page(bot, call, user_id, page):
             bot.answer_callback_query(call.id, "Нет заметок", show_alert=True)
             return
         
-        # Создаем временный обработчик для отображения
-        temp_bot = TeleBot("dummy")
-        handlers = MessageHandlers(temp_bot, api)
-        
-        # Получаем клавиатуру для страницы
-        from keyboards import create_notes_list_keyboard
+        # Создаем клавиатуру для страницы
         keyboard = create_notes_list_keyboard(notes, page=page, per_page=10)
         
         # Обновляем сообщение

@@ -142,77 +142,105 @@ class MessageHandlers:
         else:
             self._handle_normal_message(message)
     
-    def _handle_state_message(self, message: telebot.types.Message) -> None:
-        """Обработка сообщений в состоянии"""
-        chat_id = message.chat.id
-        user_id = message.from_user.id
-        state = self.user_states[chat_id]['state']
+   # handlers.py - исправленная функция _handle_state_message
+def _handle_state_message(self, message: telebot.types.Message) -> None:
+    """Обработка сообщений в состоянии"""
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    if chat_id not in self.user_states:
+        return
+    
+    state = self.user_states[chat_id]['state']
+    
+    logger.debug("state_message",
+                user_id=user_id,
+                state=state,
+                text_preview=message.text[:50] if message.text else "")
+    
+    if message.text == "❌ Отмена":
+        del self.user_states[chat_id]
+        self.bot.send_message(
+            chat_id,
+            "❌ Операция отменена.",
+            reply_markup=create_main_keyboard()
+        )
+        logger.info("operation_cancelled", user_id=user_id)
+        return
+    
+    if state == 'waiting_title':
+        self.user_states[chat_id] = {
+            'state': 'waiting_content',
+            'title': message.text
+        }
+        self.bot.send_message(
+            chat_id,
+            "✍️ Теперь введите содержание заметки:",
+            reply_markup=create_cancel_keyboard()
+        )
         
-        logger.debug("state_message",
-                    user_id=user_id,
-                    state=state,
-                    text_preview=message.text[:50] if message.text else "")
-        
-        if message.text == "❌ Отмена":
+    elif state == 'waiting_content':
+        if 'title' not in self.user_states[chat_id]:
+            logger.error("title_not_found_in_state", chat_id=chat_id)
             del self.user_states[chat_id]
             self.bot.send_message(
                 chat_id,
-                "❌ Операция отменена.",
+                "❌ Ошибка: данные заголовка не найдены.",
                 reply_markup=create_main_keyboard()
             )
-            logger.info("operation_cancelled", user_id=user_id)
             return
+            
+        self.user_states[chat_id] = {
+            'state': 'waiting_tags',
+            'title': self.user_states[chat_id]['title'],
+            'content': message.text
+        }
+        self.bot.send_message(
+            chat_id,
+            "🏷️ Введите теги через запятую (необязательно):",
+            reply_markup=create_cancel_keyboard()
+        )
         
-        if state == 'waiting_title':
-            self.user_states[chat_id] = {
-                'state': 'waiting_content',
-                'title': message.text
-            }
-            self.bot.send_message(
-                chat_id,
-                "✍️ Теперь введите содержание заметки:",
-                reply_markup=create_cancel_keyboard()
-            )
-            
-        elif state == 'waiting_content':
-            self.user_states[chat_id] = {
-                'state': 'waiting_tags',
-                'title': self.user_states[chat_id]['title'],
-                'content': message.text
-            }
-            self.bot.send_message(
-                chat_id,
-                "🏷️ Введите теги через запятую (необязательно):",
-                reply_markup=create_cancel_keyboard()
-            )
-            
-        elif state == 'waiting_tags':
-            result = self.api.add_note(
-                user_id=user_id,
-                title=self.user_states[chat_id]['title'],
-                content=self.user_states[chat_id]['content'],
-                tags=message.text.strip() or None
-            )
-            
-            note_title = self.user_states[chat_id]['title']
+    elif state == 'waiting_tags':
+        if 'title' not in self.user_states[chat_id] or 'content' not in self.user_states[chat_id]:
+            logger.error("data_not_found_in_state", chat_id=chat_id)
             del self.user_states[chat_id]
+            self.bot.send_message(
+                chat_id,
+                "❌ Ошибка: данные заметки не найдены.",
+                reply_markup=create_main_keyboard()
+            )
+            return
             
-            if result:
-                self.bot.send_message(
-                    chat_id,
-                    f"✅ Заметка '{note_title[:30]}...' создана! (ID: {result.get('id')})",
-                    reply_markup=create_main_keyboard()
-                )
-                logger.info("note_created",
-                           user_id=user_id,
-                           note_id=result.get('id'))
-            else:
-                self.bot.send_message(
-                    chat_id,
-                    "❌ Ошибка при создании заметки.",
-                    reply_markup=create_main_keyboard()
-                )
-                logger.error("note_creation_failed", user_id=user_id)
+        # Сохраняем данные перед удалением состояния
+        title = self.user_states[chat_id]['title']
+        content = self.user_states[chat_id]['content']
+        
+        result = self.api.add_note(
+            user_id=user_id,
+            title=title,
+            content=content,
+            tags=message.text.strip() or None
+        )
+        
+        del self.user_states[chat_id]
+        
+        if result:
+            self.bot.send_message(
+                chat_id,
+                f"✅ Заметка '{title[:30]}...' создана! (ID: {result.get('id')})",
+                reply_markup=create_main_keyboard()
+            )
+            logger.info("note_created",
+                       user_id=user_id,
+                       note_id=result.get('id'))
+        else:
+            self.bot.send_message(
+                chat_id,
+                "❌ Ошибка при создании заметки.",
+                reply_markup=create_main_keyboard()
+            )
+            logger.error("note_creation_failed", user_id=user_id)
     
     def _handle_normal_message(self, message: telebot.types.Message) -> None:
         """Обработка обычных сообщений"""
