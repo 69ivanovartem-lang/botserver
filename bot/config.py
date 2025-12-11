@@ -12,9 +12,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
-# Настройка structlog
+# Инициализация логгера
+logger = None
+
 def setup_logging():
     """Настройка структурированного логирования"""
+    global logger
+    
     # Преобразуем строковый уровень в числовой
     numeric_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
     
@@ -47,3 +51,11 @@ def setup_logging():
 
 # Инициализация логгера
 logger = setup_logging()
+
+# Функция для безопасного получения уровня логирования
+def get_log_level():
+    """Безопасное получение уровня логирования"""
+    try:
+        return logging.getLevelName(logger._logger.level)
+    except AttributeError:
+        return LOG_LEVEL

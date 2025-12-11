@@ -1,6 +1,6 @@
 # bot.py
 import telebot
-from config import logger, BOT_TOKEN
+from config import logger, BOT_TOKEN, API_URL, get_log_level
 from api_client import APIClient
 from handlers import MessageHandlers
 from keyboards import create_main_keyboard
@@ -19,10 +19,10 @@ def setup_bot() -> telebot.TeleBot:
     
     # Проверка доступности API
     if not api.health_check():
-        logger.warning("api_not_available")
-        print("⚠️  Внимание: API сервер недоступен!")
+        logger.warning("api_not_available", api_url=API_URL)
+        print(f"⚠️  Внимание: API сервер недоступен! ({API_URL})")
     else:
-        logger.info("api_available")
+        logger.info("api_available", api_url=API_URL)
     
     # Инициализация обработчиков
     handlers = MessageHandlers(bot, api)
@@ -45,12 +45,20 @@ def setup_bot() -> telebot.TeleBot:
     def graph_wrapper(message):
         handlers.graph_command(message)
     
+    @bot.message_handler(commands=['search'])
+    def search_wrapper(message):
+        bot.send_message(
+            message.chat.id,
+            "🔍 Введите поисковый запрос:",
+            reply_markup=create_main_keyboard()
+        )
+    
     # Обработчик всех сообщений
     @bot.message_handler(func=lambda message: True)
     def all_messages_wrapper(message):
         handlers.handle_all_messages(message)
     
-    # Обработчик callback-запросов (простой пример)
+    # Обработчик callback-запросов
     @bot.callback_query_handler(func=lambda call: True)
     def callback_handler(call):
         logger.info("callback_received",
@@ -62,6 +70,10 @@ def setup_bot() -> telebot.TeleBot:
             # TODO: реализовать логику
         elif call.data == "image_graph":
             bot.answer_callback_query(call.id, "Граф в виде изображения")
+            # TODO: реализовать логику
+        elif call.data.startswith("view_note_"):
+            note_id = call.data.replace("view_note_", "")
+            bot.answer_callback_query(call.id, f"Просмотр заметки {note_id}")
             # TODO: реализовать логику
     
     logger.info("bot_setup_completed")
@@ -76,12 +88,19 @@ def main():
         
         print("=" * 50)
         print("🤖 Zettelkasten Bot запущен!")
-        print(f"📡 API сервер: {APIClient().base_url}")
-        print(f"📝 Уровень логирования: {logger._logger.level}")
+        print(f"📡 API сервер: {API_URL}")
+        print(f"📝 Уровень логирования: {get_log_level()}")
         print("=" * 50)
         
-        # Запуск бота
-        bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        # Запуск бота с обработкой ошибок
+        while True:
+            try:
+                bot.infinity_polling(timeout=60, long_polling_timeout=60)
+            except Exception as e:
+                logger.error("polling_error", error=str(e))
+                print(f"⚠️  Ошибка polling: {e}. Перезапуск через 5 секунд...")
+                import time
+                time.sleep(5)
         
     except telebot.apihelper.ApiTelegramException as e:
         logger.critical("bot_token_error", error=str(e))
