@@ -1,19 +1,30 @@
+# Dockerfile
 FROM python:3.12-slim
 
-WORKDIR /app
-
-# Установка системных зависимостей
+# Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y \
-    wget \
-    curl \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Копирование зависимостей
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Устанавливаем рабочую директорию
+WORKDIR /app
 
-# Копирование исходного кода
-COPY bot.py .
+# Копируем зависимости отдельно для кэширования
+COPY requirements.txt .
+
+# Устанавливаем Python зависимости
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Копируем остальной код
+COPY . .
+
+# Создаем пользователя для безопасности
+RUN useradd -m -u 1000 botuser && \
+    chown -R botuser:botuser /app
+
+USER botuser
 
 # Запуск бота
 CMD ["python", "bot.py"]
